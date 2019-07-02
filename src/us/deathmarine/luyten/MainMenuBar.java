@@ -1,24 +1,28 @@
 package us.deathmarine.luyten;
 
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.net.URI;
 import java.awt.Cursor;
 import java.awt.Desktop;
 import java.awt.Font;
 import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.File;
+import java.net.URI;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.ListIterator;
 import java.util.Map;
+
 import javax.swing.AbstractAction;
 import javax.swing.AbstractButton;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.ButtonModel;
-import javax.swing.JCheckBox;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
@@ -26,6 +30,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JRadioButtonMenuItem;
+import javax.swing.JTabbedPane;
 import javax.swing.KeyStroke;
 import javax.swing.text.DefaultEditorKit;
 
@@ -42,25 +47,27 @@ public class MainMenuBar extends JMenuBar {
 	private final MainWindow mainWindow;
 	private final Map<String, Language> languageLookup = new HashMap<String, Language>();
 
-	private JCheckBox flattenSwitchBlocks;
-	private JCheckBox forceExplicitImports;
-	private JCheckBox forceExplicitTypes;
-	private JCheckBox showSyntheticMembers;
-	private JCheckBox excludeNestedTypes;
-	private JCheckBox retainRedundantCasts;
-	private JCheckBox unicodeReplacement;
-	private JCheckBox debugLineNumbers;
-	private JCheckBox showDebugInfo;
-	private JCheckBox bytecodeLineNumbers;
+	private JMenu recentFiles;
+	private JMenuItem clearRecentFiles;
+	private JCheckBoxMenuItem flattenSwitchBlocks;
+	private JCheckBoxMenuItem forceExplicitImports;
+	private JCheckBoxMenuItem forceExplicitTypes;
+	private JCheckBoxMenuItem showSyntheticMembers;
+	private JCheckBoxMenuItem excludeNestedTypes;
+	private JCheckBoxMenuItem retainRedundantCasts;
+	private JCheckBoxMenuItem unicodeReplacement;
+	private JCheckBoxMenuItem debugLineNumbers;
+	private JCheckBoxMenuItem showDebugInfo;
+	private JCheckBoxMenuItem bytecodeLineNumbers;
 	private JRadioButtonMenuItem java;
 	private JRadioButtonMenuItem bytecode;
 	private JRadioButtonMenuItem bytecodeAST;
 	private ButtonGroup languagesGroup;
 	private ButtonGroup themesGroup;
-	private JCheckBox packageExplorerStyle;
-	private JCheckBox filterOutInnerClassEntries;
-	private JCheckBox singleClickOpenEnabled;
-	private JCheckBox exitByEscEnabled;
+	private JCheckBoxMenuItem packageExplorerStyle;
+	private JCheckBoxMenuItem filterOutInnerClassEntries;
+	private JCheckBoxMenuItem singleClickOpenEnabled;
+	private JCheckBoxMenuItem exitByEscEnabled;
 	private DecompilerSettings settings;
 	private LuytenPreferences luytenPrefs;
 
@@ -111,6 +118,8 @@ public class MainMenuBar extends JMenuBar {
 
 					buildHelpMenu(helpMenu);
 					refreshMenuPopup(helpMenu);
+					
+					updateRecentFiles();
 				} catch (Exception e) {
 					Luyten.showExceptionDialog("Exception!", e);
 				}
@@ -131,6 +140,42 @@ public class MainMenuBar extends JMenuBar {
 		}.start();
 	}
 
+	public void updateRecentFiles() {
+		if (RecentFiles.paths.isEmpty()) {
+			recentFiles.setEnabled(false);
+			clearRecentFiles.setEnabled(false);
+			return;
+		} else {
+			recentFiles.setEnabled(true);
+			clearRecentFiles.setEnabled(true);
+		}
+		
+		recentFiles.removeAll();
+		ListIterator<String> li = RecentFiles.paths.listIterator(RecentFiles.paths.size());
+		boolean rfSaveNeeded = false;
+		
+		while (li.hasPrevious()) {
+			String path = li.previous();
+			final File file = new File(path);
+			
+			if (!file.exists()) {
+				rfSaveNeeded = true;
+				continue;
+			}
+			
+			JMenuItem menuItem = new JMenuItem(path);
+			menuItem.addActionListener(new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent e) {
+					mainWindow.getModel().loadFile(file);
+				}
+			});
+			recentFiles.add(menuItem);
+		}
+		
+		if (rfSaveNeeded) RecentFiles.save();
+	}
+	
 	private void buildFileMenu(final JMenu fileMenu) {
 		fileMenu.removeAll();
 		JMenuItem menuItem = new JMenuItem("Open File...");
@@ -145,13 +190,19 @@ public class MainMenuBar extends JMenuBar {
 		fileMenu.add(menuItem);
 		fileMenu.addSeparator();
 
-		menuItem = new JMenuItem("Close");
+		menuItem = new JMenuItem("Close File");
 		menuItem.setAccelerator(
 				KeyStroke.getKeyStroke(KeyEvent.VK_W, Toolkit.getDefaultToolkit().getMenuShortcutKeyMask()));
 		menuItem.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				mainWindow.onCloseFileMenu();
+				JTabbedPane house = mainWindow.getModel().house;
+				
+				if (e.getModifiers() != 2 || house.getTabCount() == 0)
+					mainWindow.onCloseFileMenu();
+				else {
+					mainWindow.getModel().closeOpenTab(house.getSelectedIndex());
+				}
 			}
 		});
 		fileMenu.add(menuItem);
@@ -180,14 +231,25 @@ public class MainMenuBar extends JMenuBar {
 		fileMenu.add(menuItem);
 		fileMenu.addSeparator();
 
-		menuItem = new JMenuItem("Recent Files");
-		menuItem.setEnabled(false);
-		fileMenu.add(menuItem);
+		recentFiles = new JMenu("Recent Files");
+		fileMenu.add(recentFiles);
+		
+		clearRecentFiles = new JMenuItem("Clear Recent Files");
+		clearRecentFiles.addActionListener(new ActionListener() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				RecentFiles.paths.clear();
+				RecentFiles.save();
+				updateRecentFiles();
+			}
+		});
+		fileMenu.add(clearRecentFiles);
+		
 		fileMenu.addSeparator();
 
 		// Only add the exit command for non-OS X. OS X handles its close
 		// automatically
-		if (!("true".equals(System.getProperty("us.deathmarine.luyten.Luyten.running_in_osx")))) {
+		if (!Boolean.getBoolean("apple.laf.useScreenMenuBar")) {
 			menuItem = new JMenuItem("Exit");
 			menuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F4, ActionEvent.ALT_MASK));
 			menuItem.addActionListener(new ActionListener() {
@@ -244,6 +306,28 @@ public class MainMenuBar extends JMenuBar {
 			}
 		});
 		editMenu.add(menuItem);
+		
+		menuItem = new JMenuItem("Find Next");
+		menuItem.setAccelerator(
+				KeyStroke.getKeyStroke(KeyEvent.VK_F3, 0));
+		menuItem.addActionListener(new ActionListener() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				if(mainWindow.findBox != null) mainWindow.findBox.fireExploreAction(true);
+			}
+		});
+		editMenu.add(menuItem);
+		
+		menuItem = new JMenuItem("Find Previous");
+		menuItem.setAccelerator(
+				KeyStroke.getKeyStroke(KeyEvent.VK_F3, InputEvent.SHIFT_DOWN_MASK));
+		menuItem.addActionListener(new ActionListener() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				if(mainWindow.findBox != null) mainWindow.findBox.fireExploreAction(false);
+			}
+		});
+		editMenu.add(menuItem);
 
 		menuItem = new JMenuItem("Find All");
 		menuItem.setAccelerator(
@@ -294,10 +378,8 @@ public class MainMenuBar extends JMenuBar {
 
 	private void buildOperationMenu(JMenu operationMenu) {
 		operationMenu.removeAll();
-		packageExplorerStyle = new JCheckBox("    Package Explorer Style");
+		packageExplorerStyle = new JCheckBoxMenuItem("Package Explorer Style");
 		packageExplorerStyle.setSelected(luytenPrefs.isPackageExplorerStyle());
-		packageExplorerStyle.setContentAreaFilled(false);
-		packageExplorerStyle.setFocusable(false);
 		packageExplorerStyle.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
@@ -307,10 +389,8 @@ public class MainMenuBar extends JMenuBar {
 		});
 		operationMenu.add(packageExplorerStyle);
 
-		filterOutInnerClassEntries = new JCheckBox("    Filter Out Inner Class Entries");
+		filterOutInnerClassEntries = new JCheckBoxMenuItem("Filter Out Inner Class Entries");
 		filterOutInnerClassEntries.setSelected(luytenPrefs.isFilterOutInnerClassEntries());
-		filterOutInnerClassEntries.setContentAreaFilled(false);
-		filterOutInnerClassEntries.setFocusable(false);
 		filterOutInnerClassEntries.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
@@ -320,10 +400,8 @@ public class MainMenuBar extends JMenuBar {
 		});
 		operationMenu.add(filterOutInnerClassEntries);
 
-		singleClickOpenEnabled = new JCheckBox("    Single Click Open");
+		singleClickOpenEnabled = new JCheckBoxMenuItem("Single Click Open");
 		singleClickOpenEnabled.setSelected(luytenPrefs.isSingleClickOpenEnabled());
-		singleClickOpenEnabled.setContentAreaFilled(false);
-		singleClickOpenEnabled.setFocusable(false);
 		singleClickOpenEnabled.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
@@ -332,10 +410,8 @@ public class MainMenuBar extends JMenuBar {
 		});
 		operationMenu.add(singleClickOpenEnabled);
 
-		exitByEscEnabled = new JCheckBox("    Exit By Esc");
+		exitByEscEnabled = new JCheckBoxMenuItem("Exit By Esc");
 		exitByEscEnabled.setSelected(luytenPrefs.isExitByEscEnabled());
-		exitByEscEnabled.setContentAreaFilled(false);
-		exitByEscEnabled.setFocusable(false);
 		exitByEscEnabled.addActionListener(new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
@@ -359,67 +435,49 @@ public class MainMenuBar extends JMenuBar {
 				}.start();
 			}
 		};
-		flattenSwitchBlocks = new JCheckBox("    Flatten Switch Blocks");
+		flattenSwitchBlocks = new JCheckBoxMenuItem("Flatten Switch Blocks");
 		flattenSwitchBlocks.setSelected(settings.getFlattenSwitchBlocks());
-		flattenSwitchBlocks.setContentAreaFilled(false);
-		flattenSwitchBlocks.setFocusable(false);
 		flattenSwitchBlocks.addActionListener(settingsChanged);
 		settingsMenu.add(flattenSwitchBlocks);
 
-		forceExplicitImports = new JCheckBox("    Force Explicit Imports");
+		forceExplicitImports = new JCheckBoxMenuItem("Force Explicit Imports");
 		forceExplicitImports.setSelected(settings.getForceExplicitImports());
-		forceExplicitImports.setContentAreaFilled(false);
-		forceExplicitImports.setFocusable(false);
 		forceExplicitImports.addActionListener(settingsChanged);
 		settingsMenu.add(forceExplicitImports);
 
-		forceExplicitTypes = new JCheckBox("    Force Explicit Types");
+		forceExplicitTypes = new JCheckBoxMenuItem("Force Explicit Types");
 		forceExplicitTypes.setSelected(settings.getForceExplicitTypeArguments());
-		forceExplicitTypes.setContentAreaFilled(false);
-		forceExplicitTypes.setFocusable(false);
 		forceExplicitTypes.addActionListener(settingsChanged);
 		settingsMenu.add(forceExplicitTypes);
 
-		showSyntheticMembers = new JCheckBox("    Show Synthetic Members");
+		showSyntheticMembers = new JCheckBoxMenuItem("Show Synthetic Members");
 		showSyntheticMembers.setSelected(settings.getShowSyntheticMembers());
-		showSyntheticMembers.setContentAreaFilled(false);
-		showSyntheticMembers.setFocusable(false);
 		showSyntheticMembers.addActionListener(settingsChanged);
 		settingsMenu.add(showSyntheticMembers);
 
-		excludeNestedTypes = new JCheckBox("    Exclude Nested Types");
+		excludeNestedTypes = new JCheckBoxMenuItem("Exclude Nested Types");
 		excludeNestedTypes.setSelected(settings.getExcludeNestedTypes());
-		excludeNestedTypes.setContentAreaFilled(false);
-		excludeNestedTypes.setFocusable(false);
 		excludeNestedTypes.addActionListener(settingsChanged);
 		settingsMenu.add(excludeNestedTypes);
 
-		retainRedundantCasts = new JCheckBox("    Retain Redundant Casts");
+		retainRedundantCasts = new JCheckBoxMenuItem("Retain Redundant Casts");
 		retainRedundantCasts.setSelected(settings.getRetainRedundantCasts());
-		retainRedundantCasts.setContentAreaFilled(false);
-		retainRedundantCasts.setFocusable(false);
 		retainRedundantCasts.addActionListener(settingsChanged);
 		settingsMenu.add(retainRedundantCasts);
 
-		unicodeReplacement = new JCheckBox("    Enable Unicode Replacement");
+		unicodeReplacement = new JCheckBoxMenuItem("Enable Unicode Replacement");
 		unicodeReplacement.setSelected(settings.isUnicodeOutputEnabled());
-		unicodeReplacement.setContentAreaFilled(false);
-		unicodeReplacement.setFocusable(false);
 		unicodeReplacement.addActionListener(settingsChanged);
 		settingsMenu.add(unicodeReplacement);
 
-		debugLineNumbers = new JCheckBox("    Show Debug Line Numbers");
+		debugLineNumbers = new JCheckBoxMenuItem("Show Debug Line Numbers");
 		debugLineNumbers.setSelected(settings.getShowDebugLineNumbers());
-		debugLineNumbers.setContentAreaFilled(false);
-		debugLineNumbers.setFocusable(false);
 		debugLineNumbers.addActionListener(settingsChanged);
 		settingsMenu.add(debugLineNumbers);
 
 		JMenu debugSettingsMenu = new JMenu("Debug Settings");
-		showDebugInfo = new JCheckBox("    Include Error Diagnostics");
+		showDebugInfo = new JCheckBoxMenuItem("Include Error Diagnostics");
 		showDebugInfo.setSelected(settings.getIncludeErrorDiagnostics());
-		showDebugInfo.setContentAreaFilled(false);
-		showDebugInfo.setFocusable(false);
 		showDebugInfo.addActionListener(settingsChanged);
 
 		debugSettingsMenu.add(showDebugInfo);
@@ -461,10 +519,8 @@ public class MainMenuBar extends JMenuBar {
 		}
 		settingsMenu.add(debugLanguagesMenu);
 
-		bytecodeLineNumbers = new JCheckBox("    Show Line Numbers In Bytecode");
+		bytecodeLineNumbers = new JCheckBoxMenuItem("Show Line Numbers In Bytecode");
 		bytecodeLineNumbers.setSelected(settings.getIncludeLineNumbersInBytecode());
-		bytecodeLineNumbers.setContentAreaFilled(false);
-		bytecodeLineNumbers.setFocusable(false);
 		bytecodeLineNumbers.addActionListener(settingsChanged);
 		settingsMenu.add(bytecodeLineNumbers);
 	}
@@ -506,8 +562,9 @@ public class MainMenuBar extends JMenuBar {
 				pane.add(link);
 				pane.add(new JLabel("Contributions By:"));
 				pane.add(new JLabel("zerdei, toonetown, dstmath"));
-				pane.add(new JLabel("virustotalop, xtrafrancyz"));
-				pane.add(new JLabel("mbax, quitten, and mstrobel"));
+				pane.add(new JLabel("virustotalop, xtrafrancyz,"));
+				pane.add(new JLabel("mbax, quitten, mstrobel,"));
+				pane.add(new JLabel("FisheyLP, and Syquel"));
 				pane.add(new JLabel(" "));
 				pane.add(new JLabel("Powered By:"));
 				String procyon = "https://bitbucket.org/mstrobel/procyon";
@@ -516,14 +573,14 @@ public class MainMenuBar extends JMenuBar {
 				link.addMouseListener(new LinkListener(procyon, link));
 				pane.add(link);
 				pane.add(new JLabel("Version: " + Procyon.version()));
-				pane.add(new JLabel("(c) 2016 Mike Strobel"));
+				pane.add(new JLabel("(c) 2018 Mike Strobel"));
 				String rsyntax = "https://github.com/bobbylight/RSyntaxTextArea";
 				link = new JLabel("<HTML><FONT color=\"#000099\"><U>" + rsyntax + "</U></FONT></HTML>");
 				link.setCursor(new Cursor(Cursor.HAND_CURSOR));
 				link.addMouseListener(new LinkListener(rsyntax, link));
 				pane.add(link);
-				pane.add(new JLabel("Version: 2.6.0"));
-				pane.add(new JLabel("(c) 2016 Robert Futrell"));
+				pane.add(new JLabel("Version: 3.0.2"));
+				pane.add(new JLabel("(c) 2019 Robert Futrell"));
 				pane.add(new JLabel(" "));
 				JOptionPane.showMessageDialog(null, pane);
 			}
